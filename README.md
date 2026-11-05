@@ -9,7 +9,7 @@ There are two independent modules. Each is a single HTML file with no libraries,
 | Basics | `bgp-visualizer.html` | BGP-4 as defined in RFC 4271: session setup, the finite state machine, UPDATE, timers, errors |
 | Advanced | `bgp-advanced.html` | Route reflectors, confederations, loop prevention, path selection, flap damping, MPLS L3VPN, EVPN |
 
-**Live demo:** https://YOUR-USERNAME.github.io/bgp-visualizer/bgp-visualizer.html and https://YOUR-USERNAME.github.io/bgp-visualizer/bgp-advanced.html
+**Live demo:** https://sunilgama.github.io/bgp-visualizer/bgp-visualizer.html and https://sunilgama.github.io/bgp-visualizer/bgp-advanced.html
 
 ## Module 1: BGP basics (`bgp-visualizer.html`)
 
