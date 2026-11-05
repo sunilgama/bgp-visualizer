@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BGP-4 interactive visualizer (RFC 4271)</title>
+<style>
+:root{--bg:#eef1f5;--panel:#fff;--ink:#122033;--mut:#556579;--line:#c3cdda;--soft:#e3e9f1;--acc:#f2a900;--ctl:#5b6b80;--req:#2f6fe4;--res:#178a5b;--err:#d63a3f;--sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#0b1624;--panel:#12233a;--ink:#e6edf6;--mut:#93a4ba;--line:#2a3f5c;--soft:#0f2036}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 15px/1.55 var(--sans)}
+.page{max-width:1240px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:clamp(22px,3vw,30px);margin:0 0 4px;line-height:1.2}
+h2{font-size:18px;margin:0 0 6px}h3{font-size:15px;margin:14px 0 6px}
+.sub{color:var(--mut);margin:0 0 14px;max-width:80ch}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+button{font:500 14px var(--sans);padding:8px 13px;border:1.5px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;cursor:pointer}
+button:disabled{opacity:.4;cursor:default}
+button:focus-visible,input:focus-visible{outline:3px solid var(--req);outline-offset:2px}
+.tabs button[aria-selected="true"],.pri{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.grid{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
+@media(min-width:1020px){.grid{grid-template-columns:minmax(0,1.55fr) minmax(0,1fr)}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+svg{display:block;width:100%;height:auto}
+svg text{font-family:var(--sans)}
+.mono{font-family:var(--mono)}
+.dev rect.box{fill:var(--panel);stroke:var(--ink);stroke-width:1.5}
+.dev.hot rect.box{stroke:var(--acc);stroke-width:4}
+.lnk{stroke:var(--line);stroke-width:5;stroke-linecap:round}
+.lnk.hot{stroke:var(--acc)}.lnk.down{stroke:var(--err);stroke-dasharray:3 9}
+.tok{cursor:pointer}.tok.sel rect.pill{stroke:var(--ink);stroke-width:3}
+.fsm{display:grid;gap:6px;margin-top:8px}
+.fsm div{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.fsm b{width:28px;font-size:13px}
+.fsm span{font-size:12px;padding:3px 8px;border-radius:999px;border:1.5px solid var(--line);color:var(--mut)}
+.fsm span.on{color:#fff;border-color:transparent;font-weight:600}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--mut);margin:8px 0}
+.legend i{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:5px}
+.ctrl{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.ctrl label{font-size:13px;color:var(--mut)}
+.ctrl input{width:130px}
+.cnt{margin-left:auto;font-size:13px;color:var(--mut)}
+.ev{font:500 13px var(--mono);color:var(--mut);margin:6px 0}
+.tag{display:inline-block;font-size:12px;border-radius:6px;padding:1px 7px;background:var(--soft);color:var(--mut);margin-right:6px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+td,th{border-bottom:1px solid var(--line);padding:4px 6px;text-align:left;vertical-align:top}
+th{color:var(--mut);font-weight:600}
+td:nth-child(2){font-family:var(--mono);white-space:nowrap}
+.insp h4{margin:10px 0 4px;font-size:13px}
+.log{max-height:200px;overflow:auto;margin:0;padding:0;list-style:none}
+.log button{width:100%;text-align:left;padding:4px 8px;border-radius:6px;font:400 12.5px var(--mono);border:1.5px solid transparent;display:flex;gap:8px;align-items:center}
+.log button.sel{border-color:var(--ink)}
+.dot{width:10px;height:10px;border-radius:3px;flex:none}
+.docs{margin-top:18px;display:grid;gap:16px}
+@media(min-width:900px){.docs{grid-template-columns:1fr 1fr}}
+.docs ul,.docs ol{margin:4px 0 0;padding-left:20px}
+.docs li{margin:3px 0}
+.docs .wide{grid-column:1/-1}
+</style>
+</head>
+<body>
+<div class="page">
+<h1>BGP-4: how two routers become neighbours and exchange routes</h1>
+<p class="sub">An interactive walk through RFC 4271 (BGP-4). Pick a scenario, press Play, and watch each packet, timer and state change. Click any packet to see its headers.</p>
+<div class="tabs" id="tabs" role="tablist"></div>
+<div class="grid">
+<div>
+<div class="card">
+<svg id="svg" viewBox="0 0 960 310" role="img" aria-label="BGP routers, links and packets"></svg>
+<div class="fsm" id="fsm" aria-label="BGP finite state machine"></div>
+<div class="legend">
+<span><i style="background:var(--ctl)"></i>Control (TCP)</span>
+<span><i style="background:var(--req)"></i>Request / advertisement (OPEN, UPDATE)</span>
+<span><i style="background:var(--res)"></i>Response (KEEPALIVE)</span>
+<span><i style="background:var(--err)"></i>Error (NOTIFICATION, RST)</span>
+</div>
+<div class="ctrl">
+<button id="bReset">Reset</button><button id="bPrev">Previous</button><button id="bPlay" class="pri">Play</button><button id="bPause">Pause</button><button id="bNext">Next step</button>
+<label for="sp">Speed</label><input id="sp" type="range" min="0.25" max="3" step="0.25" value="1"><span id="spv" class="mono" style="font-size:13px">1.0x</span>
+<span class="cnt" id="cnt"></span>
+</div>
+</div>
+<div class="card" style="margin-top:16px" aria-live="polite">
+<h2 id="ttl"></h2><p id="desc" style="margin:0 0 6px"></p>
+<div class="ev" id="ev"></div><div id="note" style="font-size:13px;color:var(--mut)"></div>
+</div>
+</div>
+<div>
+<div class="card insp" id="insp"><h2>Packet inspector</h2><p style="color:var(--mut)">Click a packet in the diagram or in the log to see its headers.</p></div>
+<div class="card" style="margin-top:16px"><h2>Packet log</h2><ul class="log" id="log"></ul></div>
+</div>
+</div>
+
+<section class="docs">
+<div class="card"><h2>Protocol overview</h2>
+<p>BGP (Border Gateway Protocol, version 4, RFC 4271) is the routing protocol that connects independent networks, called Autonomous Systems (AS), on the Internet. Each AS has a number. Two routers that exchange routes are neighbours (peers). BGP does not discover neighbours: you configure them. It runs on TCP port 179, so TCP handles reliable delivery, and BGP itself only needs to decide which routes to tell and which to believe.</p>
+<p>An <b>eBGP</b> session connects different ASes. An <b>iBGP</b> session connects routers inside the same AS. This page shows eBGP.</p></div>
+<div class="card"><h2>Packet flow summary</h2>
+<ol><li>TCP three-way handshake to port 179 (SYN, SYN+ACK, ACK).</li><li>Both sides send OPEN: version, AS, Hold Time, router ID.</li><li>Both validate the OPEN, negotiate the Hold Time, send KEEPALIVE.</li><li>On receiving KEEPALIVE the session is Established.</li><li>UPDATE messages announce or withdraw prefixes.</li><li>KEEPALIVEs keep the session alive. Silence longer than the Hold Time, or any error, produces a NOTIFICATION and the session closes.</li></ol></div>
+<div class="card"><h2>Key messages (RFC 4271 section 4)</h2>
+<table><tr><th>Type</th><th>Purpose</th></tr>
+<tr><td>OPEN (1)</td><td>Introduces the sender: version, AS number, Hold Time, BGP Identifier, optional capabilities.</td></tr>
+<tr><td>UPDATE (2)</td><td>Announces routes (NLRI with path attributes) and/or withdraws routes.</td></tr>
+<tr><td>NOTIFICATION (3)</td><td>Reports an error. The session is closed right after.</td></tr>
+<tr><td>KEEPALIVE (4)</td><td>19 bytes, header only. Confirms an OPEN, and proves liveness afterwards.</td></tr></table></div>
+<div class="card"><h2>Timers (RFC 4271 section 10)</h2>
+<table><tr><th>Timer</th><th>Suggested</th><th>Meaning</th></tr>
+<tr><td>ConnectRetryTimer</td><td>120 s</td><td>Wait before trying TCP again.</td></tr>
+<tr><td>HoldTimer</td><td>90 s</td><td>Maximum silence. Negotiated as the smaller of both OPEN values (0 or at least 3 s).</td></tr>
+<tr><td>KeepaliveTimer</td><td>Hold / 3</td><td>Interval between KEEPALIVEs.</td></tr>
+<tr><td>MinRouteAdvertisementInterval</td><td>30 s eBGP, 5 s iBGP</td><td>Limits how often one prefix is re-advertised.</td></tr></table></div>
+<div class="card wide"><h2>Finite state machine (RFC 4271 section 8)</h2>
+<table><tr><th>State</th><th>Meaning</th></tr>
+<tr><td>Idle</td><td>Refuses connections, holds no resources. Waits for a start event.</td></tr>
+<tr><td>Connect</td><td>Waiting for the outgoing TCP connection to complete.</td></tr>
+<tr><td>Active</td><td>Listening for an incoming TCP connection, or waiting to retry after a failed attempt.</td></tr>
+<tr><td>OpenSent</td><td>TCP is up and our OPEN was sent. Waiting for the peer’s OPEN.</td></tr>
+<tr><td>OpenConfirm</td><td>Peer’s OPEN accepted. Waiting for its KEEPALIVE.</td></tr>
+<tr><td>Established</td><td>Session is up. UPDATE, KEEPALIVE and NOTIFICATION may be exchanged.</td></tr></table></div>
+<div class="card wide"><h2>Assumptions and simplifications</h2>
+<ul>
+<li>RFC 4271 behaviour is shown. Extensions are not: multiprotocol BGP (RFC 4760), 4-byte AS numbers (RFC 6793), route refresh and graceful restart. OPEN messages are drawn without optional parameters. Real routers send capabilities, which makes the OPEN longer than 29 bytes.</li>
+<li>The optional DelayOpen and IdleHold timers, the connection collision rules (section 6.8) and route flap damping are not shown.</li>
+<li>Route selection is reduced to a single candidate. The full decision process (section 9.1) compares LOCAL_PREF, AS_PATH length, ORIGIN, MED and more.</li>
+<li>Time-lapse steps compress seconds into a few animated seconds. TCP sequence numbers are only shown on handshake segments. The IP and TCP details in the inspector are typical values, not captured data.</li>
+<li>Router R1 always opens the TCP connection, so it uses an ephemeral source port. Routing policy, authentication (TCP-AO, MD5) and eBGP TTL checks are not shown.</li>
+</ul></div>
+</section>
+</div>
+<script>
+const $=s=>document.querySelector(s),NS="http://www.w3.org/2000/svg";
+const el=(t,a,p)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);p&&p.appendChild(e);return e};
+const DEV={R1:{as:65001,id:"1.1.1.1"},R2:{as:65002,id:"2.2.2.2"},R3:{as:65003,id:"3.3.3.3"}};
+const LINKS=[["R1","R2","192.0.2.1","192.0.2.2",50123],["R2","R3","198.51.100.2","198.51.100.3",50200]];
+const STATES=["Idle","Connect","Active","OpenSent","OpenConfirm","Established"];
+const SCOL={Idle:"#7a8aa0",Connect:"#c98a00",Active:"#c98a00",OpenSent:"#2f6fe4",OpenConfirm:"#2f6fe4",Established:"#178a5b"};
+const TN={cr:"ConnectRetry",hold:"Hold",ka:"Keepalive"};
+const FL=1600;
+const tcp=(fl,seq,ack,rt)=>({k:"tcp",fl,seq,ack,rt}),open=(as,hold,id)=>({k:"open",as,hold,id}),KA={k:"ka"},nf=(code,sub)=>({k:"nf",code,sub});
+const upd=o=>Object.assign({k:"upd",wd:[],path:null,nh:null,nlri:[]},o);
+const M=(f,t,p,o)=>Object.assign({f,t,p,w:0},o);
+const HS=(a,b)=>[M(a,b,tcp("SYN",1000,null)),M(b,a,tcp("SYN-ACK",5000,1001),{w:1}),M(a,b,tcp("ACK",1001,5001),{w:2})];
+const OK=(h2)=>[M("R1","R2",open(65001,90,"1.1.1.1")),M("R2","R1",open(65002,h2||90,"2.2.2.2")),M("R1","R2",KA,{w:1}),M("R2","R1",KA,{w:1})];
+const TM=(c,h,k)=>({cr:c,hold:h,ka:k});
+const EST={hold:[90,90],ka:[30,30],cr:null};
+const label=p=>p.k==="tcp"?`${p.fl}${p.rt?" (retry)":""} ${p.seq!=null?"s="+p.seq:""}${p.ack!=null?" a="+p.ack:""}`.trim():p.k==="open"?`OPEN AS${p.as} hold=${p.hold}`:p.k==="ka"?"KEEPALIVE":p.k==="nf"?`NOTIFICATION ${p.code}/${p.sub}`:(p.nlri.length?"UPDATE +"+p.nlri[0]:"UPDATE -"+p.wd[0]);
+const cat=p=>p.k==="tcp"?(p.fl==="RST"?"err":"ctl"):p.k==="ka"?"res":p.k==="nf"?"err":"req";
+const SC=[
+{n:"1  Session setup",x:{R1:160,R2:800},links:[0],init:{st:{R1:"Idle",R2:"Idle"},tm:{},rib:{}},steps:[
+{t:"Starting point: both routers are Idle",d:"R1 (AS 65001) and R2 (AS 65002) are directly connected. Routers that exchange BGP routes are called neighbours. In Idle, a router ignores incoming BGP connections and holds no resources. Nothing happens until the session is started by an administrator or the system.",ev:"Initial state: Idle on both routers",hl:["R1","R2"]},
+{t:"Start: R1 connects, R2 listens",d:"R1 is started. It moves to Connect, starts the ConnectRetryTimer (120 s) and prepares to open a TCP connection. R2 is set to wait for the peer, so it moves to Active, where it listens for an incoming connection. Active means listening here, not sending.",ev:"R1: ManualStart. R2: ManualStart with PassiveTcpEstablishment.",s0:{R1:"Connect",R2:"Active"},tm:{R1:{cr:[120,120]}},hl:["R1","R2"]},
+{t:"TCP step 1: SYN",d:"BGP does not deliver packets by itself. It uses TCP port 179, so messages arrive complete and in order. TCP begins with a three-way handshake. R1 sends a SYN to port 179: ‘I want a connection, my first sequence number is 1000’.",ev:"BGP state unchanged: Connect / Active",pk:[HS("R1","R2")[0]]},
+{t:"TCP step 2: SYN+ACK",d:"R2 is listening on port 179, so it accepts: ‘Agreed. My sequence numbers start at 5000, and I expect your byte 1001 next’.",ev:"BGP state unchanged",pk:[HS("R1","R2")[1]]},
+{t:"TCP step 3: ACK",d:"R1 confirms. TCP is now up in both directions. No BGP message has been sent yet, so BGP is still waiting. The three-way handshake is what makes the next messages reliable.",ev:"Event 16/17: Tcp_CR_Acked / TcpConnectionConfirmed",pk:[HS("R1","R2")[2]]},
+{t:"OPEN: introduce yourself",d:"Each router sends an OPEN message: BGP version, its own AS number, the Hold Time it proposes, and its BGP Identifier (router ID). Both move to OpenSent. Until the Hold Time is agreed, a large temporary hold timer of 4 minutes protects the session.",ev:"Send OPEN, then Connect/Active → OpenSent",pk:OK().slice(0,2),s0:{R1:"OpenSent",R2:"OpenSent"},tm:{R1:{cr:null,hold:[240,240]},R2:{cr:null,hold:[240,240]}}},
+{t:"Validate OPEN, agree timers, send KEEPALIVE",d:"Each router checks the other’s OPEN: is the version supported, is the AS number the expected one, are the router IDs different? All good. They pick the Hold Time as the smaller proposed value (R1 offered 90 s, R2 offered 180 s, so 90 s) and a keepalive interval of one third of it (30 s). Each answers with a KEEPALIVE, which here means ‘I accept your OPEN’. When it receives the peer’s KEEPALIVE the session is Established.",ev:"Event 19 BGPOpen → OpenConfirm. Event 26 KeepAliveMsg → Established.",pk:[M("R1","R2",open(65001,90,"1.1.1.1"),{w:9,skip:1})].slice(1).concat([M("R1","R2",KA),M("R2","R1",KA)]),s0:{R1:"OpenConfirm",R2:"OpenConfirm"},st:{R1:"Established",R2:"Established"},tm:{R1:EST,R2:EST}},
+{t:"UPDATE: exchange routes",d:"Now that the session is Established, the routers swap routing information with UPDATE messages. Each UPDATE announces a prefix (NLRI) with path attributes: ORIGIN, AS_PATH (the list of ASes the route crossed) and NEXT_HOP (where to forward traffic). The receiver stores the route in its Adj-RIB-In and runs its decision process.",ev:"Event 27 UpdateMsg, state stays Established",pk:[M("R1","R2",upd({path:[65001],nh:"192.0.2.1",nlri:["10.0.0.0/24"]})),M("R2","R1",upd({path:[65002],nh:"192.0.2.2",nlri:["20.0.0.0/24"]}))],rib:{R1:["20.0.0.0/24 AS:65002","next hop 192.0.2.2"],R2:["10.0.0.0/24 AS:65001","next hop 192.0.2.1"]}},
+{t:"Quiet time: timers run down",d:"Time-lapse: 30 seconds pass and nobody has anything new to say. The Keepalive timer reaches 0, and the Hold timer has dropped from 90 s to 60 s.",ev:"KeepaliveTimer_Expires about to fire",tl:1,tm:{R1:{hold:[60,90],ka:[0,30]},R2:{hold:[60,90],ka:[0,30]}},hl:["R1","R2"]},
+{t:"KEEPALIVE: still alive",d:"Each router sends a KEEPALIVE (19 bytes, header only) and restarts its keepalive timer. On arrival, the receiver restarts its Hold timer at 90 s. As long as some message arrives before the Hold timer expires, the neighbour counts as alive.",ev:"Event 26 KeepAliveMsg: restart HoldTimer",pk:[M("R1","R2",KA),M("R2","R1",KA)],tm:{R1:EST,R2:EST}}]},
+{n:"2  Route advertisement",x:{R1:120,R2:480,R3:840},links:[0,1],init:{st:{R1:"Established",R2:"Established",R3:"Established"},tm:{R1:EST,R2:EST,R3:EST},rib:{R1:["originates 10.0.0.0/24"]}},steps:[
+{t:"Starting point: two Established sessions",d:"R1 peers with R2, and R2 peers with R3. These are eBGP sessions because the AS numbers differ. R1 owns the network 10.0.0.0/24 and wants the others to learn it. A BGP router only advertises routes it has chosen as best.",ev:"All sessions Established",hl:["R1","R2","R3"]},
+{t:"R1 announces 10.0.0.0/24",d:"R1 sends an UPDATE. Because the message crosses an AS boundary, R1 puts its own AS in AS_PATH and its own address as NEXT_HOP.",ev:"UPDATE: ORIGIN=IGP, AS_PATH=[65001], NEXT_HOP=192.0.2.1",pk:[M("R1","R2",upd({path:[65001],nh:"192.0.2.1",nlri:["10.0.0.0/24"]}))],rib:{R2:["10.0.0.0/24 AS:65001","next hop 192.0.2.1"]}},
+{t:"R2 decides what to do with it",d:"R2 checks the route. First: is my own AS (65002) in AS_PATH? No, so there is no loop. Second: can I reach the next hop 192.0.2.1? Yes. Third: with one candidate it is the best path. (With several, R2 compares LOCAL_PREF, AS_PATH length, ORIGIN, MED and more.) The best path enters the Loc-RIB and the forwarding table.",ev:"RFC 4271 section 9.1: decision process",hl:["R2"],rib:{R2:["10.0.0.0/24 AS:65001","next hop 192.0.2.1","best path, installed"]}},
+{t:"R2 passes it on to R3",d:"Before sending to an external neighbour, R2 adds its own AS to the front of AS_PATH and sets NEXT_HOP to its own address on the shared link, because R3 can reach R2’s link but not R1’s.",ev:"UPDATE: AS_PATH=[65002 65001], NEXT_HOP=198.51.100.2",pk:[M("R2","R3",upd({path:[65002,65001],nh:"198.51.100.2",nlri:["10.0.0.0/24"]}))],rib:{R3:["10.0.0.0/24 AS:65002 65001","next hop 198.51.100.2"]}},
+{t:"What if the route came back? (loop prevention)",d:"Imagine R2 sent this route back to R1. R1 would see its own AS 65001 inside AS_PATH, which means the route has already crossed R1’s AS. Accepting it could create a loop, so R1 rejects it. This simple rule is how BGP avoids loops between ASes. (Real routers also do not send a route back to the neighbour it came from.)",ev:"RFC 4271 section 9.1.2: exclude routes with an AS loop",pk:[M("R2","R1",upd({path:[65002,65001],nh:"192.0.2.2",nlri:["10.0.0.0/24"]}))],rib:{R1:["originates 10.0.0.0/24","rejected: own AS in path"]}},
+{t:"R1 withdraws the route",d:"10.0.0.0/24 stops being reachable at R1 (for example its interface went down). R1 sends an UPDATE whose Withdrawn Routes field lists the prefix. It has no path attributes and no NLRI. R2 deletes the route.",ev:"UPDATE: Withdrawn Routes = [10.0.0.0/24]",pk:[M("R1","R2",upd({wd:["10.0.0.0/24"]}))],rib:{R1:["10.0.0.0/24 withdrawn"],R2:[]}},
+{t:"The withdrawal spreads to R3",d:"R2 no longer has any path to the prefix, so it tells R3 too. Withdrawals travel hop by hop like announcements do.",ev:"UPDATE: Withdrawn Routes = [10.0.0.0/24]",pk:[M("R2","R3",upd({wd:["10.0.0.0/24"]}))],rib:{R3:[]}}]},
+{n:"3  Hold timer expiry",x:{R1:120,R2:480,R3:840},links:[0,1],init:{st:{R1:"Established",R2:"Established",R3:"Established"},tm:{R1:EST,R2:EST,R3:EST},rib:{R1:["originates 10.0.0.0/24"],R2:["10.0.0.0/24 AS:65001","next hop 192.0.2.1"],R3:["10.0.0.0/24 AS:65002 65001","next hop 198.51.100.2"]}},steps:[
+{t:"Starting point: everything works",d:"R2 and R3 know 10.0.0.0/24. Hold Time is 90 s and KEEPALIVEs are sent every 30 s. In this scenario the cable between R1 and R2 fails without warning.",ev:"All sessions Established",hl:["R1","R2","R3"]},
+{t:"Normal keepalives",d:"As usual, KEEPALIVEs cross the link and each Hold timer is restarted at 90 s.",ev:"Event 26 KeepAliveMsg",pk:[M("R1","R2",KA),M("R2","R1",KA)]},
+{t:"The link fails",d:"The cable is cut (or the neighbour crashes). Nobody tells the routers. R1’s next KEEPALIVE vanishes. BGP learns about this kind of failure only through silence.",ev:"No event yet: the routers do not know",link:{"R1-R2":"down"},pk:[M("R1","R2",KA,{lost:.5})]},
+{t:"Time-lapse: the Hold timer runs out",d:"90 seconds pass. No KEEPALIVE or UPDATE arrives, so each Hold timer, restarted at 90 s by the last message, counts down to 0.",ev:"HoldTimer counting down: 90 s → 0 s",tl:1,tm:{R1:{hold:[0,90]},R2:{hold:[0,90]}}},
+{t:"Hold Timer Expired: NOTIFICATION",d:"R2 sends a NOTIFICATION with error code 4, Hold Timer Expired, and closes TCP. Here the message cannot arrive because the cable is cut, but R2 still ends the session on its own side. It deletes every route learned from R1 and goes to Idle. R1 does the same.",ev:"Event 10 HoldTimer_Expires → Idle (RFC 4271 section 6.5)",pk:[M("R2","R1",nf(4,0),{lost:.5})],s0:{R1:"Idle",R2:"Idle"},tm:{R1:TM(null,null,null),R2:TM(null,null,null)},rib:{R2:[]}},
+{t:"R2 withdraws the route from R3",d:"R2 lost its only path to 10.0.0.0/24, so it withdraws the prefix from R3. The R2–R3 session is unaffected: a failed neighbour only removes the routes learned through it.",ev:"UPDATE: Withdrawn Routes = [10.0.0.0/24]",pk:[M("R2","R3",upd({wd:["10.0.0.0/24"]}))],rib:{R3:[]}},
+{t:"Link repaired: reconnect",d:"The cable is fixed. Both routers are Idle and restart (possibly after an IdleHold delay). R1 moves to Connect and starts the ConnectRetryTimer, while R2 listens in Active. The TCP handshake succeeds, as in scenario 1.",ev:"ManualStart / AutomaticStart → Connect and Active",link:{"R1-R2":"up"},s0:{R1:"Connect",R2:"Active"},tm:{R1:{cr:[120,120]}},pk:HS("R1","R2")},
+{t:"OPEN and KEEPALIVE again",d:"OPENs are exchanged and accepted exactly as in scenario 1. The routers negotiate a Hold Time of 90 s and the session is Established again.",ev:"OpenSent → OpenConfirm → Established",s0:{R1:"OpenSent",R2:"OpenSent"},pk:OK().map((m,i)=>i>1?Object.assign({},m,{w:1}):m),st:{R1:"Established",R2:"Established"},tm:{R1:Object.assign({},EST),R2:Object.assign({},EST)}},
+{t:"Routes are learned again",d:"R1 announces 10.0.0.0/24 again. R2 installs it and passes it on to R3. The network has recovered by itself.",ev:"UPDATE messages",pk:[M("R1","R2",upd({path:[65001],nh:"192.0.2.1",nlri:["10.0.0.0/24"]})),M("R2","R3",upd({path:[65002,65001],nh:"198.51.100.2",nlri:["10.0.0.0/24"]}),{w:1})],rib:{R2:["10.0.0.0/24 AS:65001","next hop 192.0.2.1"],R3:["10.0.0.0/24 AS:65002 65001","next hop 198.51.100.2"]}}]},
+{n:"4  OPEN message error",x:{R1:160,R2:800},links:[0],init:{st:{R1:"Idle",R2:"Idle"},tm:{},rib:{}},steps:[
+{t:"Setup: R1 expects the wrong AS",d:"Someone configured R1 with ‘neighbor 192.0.2.2 remote-as 65099’, but R2 really belongs to AS 65002. A typo like this is a very common BGP problem. Let’s see how BGP detects and reports it.",ev:"R1 expects AS 65099. R2 is AS 65002.",hl:["R1","R2"]},
+{t:"Start the session",d:"As before, R1 moves to Connect and R2 listens in Active.",ev:"ManualStart",s0:{R1:"Connect",R2:"Active"},tm:{R1:{cr:[120,120]}}},
+{t:"TCP connects normally",d:"The three TCP segments succeed. TCP knows nothing about the AS configuration, so BGP cannot notice the mistake until it sees R2’s OPEN.",ev:"TCP established",pk:HS("R1","R2")},
+{t:"OPEN messages are exchanged",d:"Both routers send OPEN. R2’s OPEN says ‘My AS = 65002’.",ev:"OpenSent on both routers",pk:OK().slice(0,2),s0:{R1:"OpenSent",R2:"OpenSent"},tm:{R1:{cr:null,hold:[240,240]},R2:{cr:null,hold:[240,240]}}},
+{t:"R1 rejects the OPEN: NOTIFICATION",d:"R1 compares R2’s AS (65002) with the configured one (65099). They differ, so R1 sends a NOTIFICATION: error code 2 (OPEN Message Error), subcode 2 (Bad Peer AS), and goes to Idle. R2’s check of R1’s OPEN passed, so R2 sends a normal KEEPALIVE at the same moment.",ev:"Event 21 BGPOpenMsgErr → send NOTIFICATION → Idle (section 6.2)",pk:[M("R1","R2",nf(2,2)),M("R2","R1",KA)],s0:{R2:"OpenConfirm"},st:{R1:"Idle"},tm:{R1:TM(null,null,null)}},
+{t:"R2 receives the error and closes the session",d:"A NOTIFICATION always ends the session: TCP is closed and R2 releases its resources and goes to Idle. Code 2 / subcode 2 tells the operator exactly what is wrong. Real routers write it to the log.",ev:"Event 24 NotifMsg → Idle",hl:["R2"],st:{R2:"Idle"},tm:{R2:TM(null,null,null)}},
+{t:"Retry after the ConnectRetryTimer",d:"Time-lapse: R1 does not give up. After the retry delay (ConnectRetryTimer, 120 s suggested) it tries again. The same configuration produces the same error, so the session flaps. Many routers increase the delay each time (IdleHold) so that they do not hammer the neighbour.",ev:"ConnectRetryTimer_Expires → try again",tl:1,s0:{R1:"Connect",R2:"Active"},tm:{R1:{cr:[0,120]}}},
+{t:"Fix: correct the remote AS",d:"After changing the configuration to remote-as 65002, R1’s check passes. The OPEN exchange succeeds and the session reaches Established, as in scenario 1.",ev:"OpenConfirm → Established",st:{R1:"Established",R2:"Established"},tm:{R1:EST,R2:EST}}]},
+{n:"5  TCP failure and retry",x:{R1:160,R2:800},links:[0],init:{st:{R1:"Idle",R2:"Idle"},tm:{},rib:{}},steps:[
+{t:"Setup: R2 is not ready",d:"R1 is configured to peer with R2, but R2 has not enabled BGP yet and a firewall in between blocks TCP port 179. Watch how TCP and BGP keep trying, and how the ConnectRetryTimer drives recovery.",ev:"R2 not listening",hl:["R1","R2"]},
+{t:"First SYN is lost",d:"R1 starts, moves to Connect, starts the ConnectRetryTimer and sends a SYN. The firewall silently drops it. No answer comes back.",ev:"ManualStart → Connect",s0:{R1:"Connect"},tm:{R1:{cr:[120,120]}},pk:[M("R1","R2",tcp("SYN",1000,null),{lost:.5})]},
+{t:"TCP retransmits the SYN",d:"No reply, so TCP sends the SYN again. Each retry waits about twice as long as the previous one (1 s, 2 s, 4 s, …). This recovery belongs to TCP. BGP simply stays in Connect.",ev:"TCP retransmission, BGP state unchanged",pk:[M("R1","R2",tcp("SYN",1000,null,1),{lost:.5})]},
+{t:"The port is reached, but nothing listens: RST",d:"The firewall is fixed and the SYN arrives. R2’s operating system has no BGP process listening on port 179, so TCP replies with RST (‘reset: no such connection’). R1 sees the failure, restarts the ConnectRetryTimer and moves to Active to wait.",ev:"Event 18 TcpConnectionFails → Active",pk:[M("R1","R2",tcp("SYN",1000,null,1)),M("R2","R1",tcp("RST",0,1001),{w:1})],st:{R1:"Active"},tm:{R1:{cr:[120,120]}}},
+{t:"Waiting for the ConnectRetryTimer",d:"Time-lapse: R1 waits. Meanwhile the administrator enables BGP on R2, which now listens on port 179 in the Active state.",ev:"ConnectRetryTimer running",tl:1,s0:{R2:"Active"},tm:{R1:{cr:[0,120]}}},
+{t:"Timer expires: new attempt succeeds",d:"The ConnectRetryTimer expires. R1 restarts it, returns to Connect and opens a new TCP connection. This time R2 is listening, and the handshake completes.",ev:"Event 9 ConnectRetryTimer_Expires → Connect",s0:{R1:"Connect"},tm:{R1:{cr:[120,120]}},pk:HS("R1","R2")},
+{t:"BGP session comes up",d:"OPEN and KEEPALIVE are exchanged as in scenario 1. The ConnectRetryTimer is stopped, the Hold Time is negotiated to 90 s, and both routers reach Established.",ev:"OpenSent → OpenConfirm → Established",s0:{R1:"OpenSent",R2:"OpenSent"},pk:OK().map((m,i)=>i>1?Object.assign({},m,{w:1}):m),st:{R1:"Established",R2:"Established"},tm:{R1:EST,R2:EST}}]}
+];
+SC[0].steps[6].pk=[M("R1","R2",KA),M("R2","R1",KA)];
+let C=0,idx=0,ST,base,endST,DOM={},PK=[],vt=0,DUR=0,last=0,anim=false,auto=false,raf=0,tmo=0,speed=1,LOG=[],selM=null,msgN=0;
+const clone=o=>JSON.parse(JSON.stringify(o));
+function initST(){const sc=SC[C],s=clone(sc.init);s.link={};s.tm=s.tm||{};s.rib=s.rib||{};Object.keys(sc.x).forEach(r=>{s.tm[r]=Object.assign({cr:null,hold:null,ka:null},s.tm[r]);s.rib[r]=s.rib[r]||[];s.st[r]=s.st[r]||"Idle"});return s}
+function applyStart(s,o){if(o.link)Object.assign(s.link,o.link);if(o.s0)Object.assign(s.st,o.s0)}
+function applyEnd(s,o){if(o.st)Object.assign(s.st,o.st);if(o.tm)for(const r in o.tm)Object.assign(s.tm[r],clone(o.tm[r]));if(o.rib)for(const r in o.rib)s.rib[r]=o.rib[r].slice()}
+function build(){
+ const sc=SC[C],svg=$("#svg");svg.innerHTML="";DOM={links:{}};
+ sc.links.forEach(li=>{const L=LINKS[li],x1=sc.x[L[0]],x2=sc.x[L[1]],k=L[0]+"-"+L[1];
+  const ln=el("line",{x1:x1+100,y1:105,x2:x2-100,y2:105,class:"lnk"},svg);
+  const tx=el("text",{x:(x1+x2)/2,y:150,"text-anchor":"middle","font-size":11,fill:"var(--mut)"},svg);tx.textContent=`${L[2]} ↔ ${L[3]}  (eBGP)`;
+  const cut=el("text",{x:(x1+x2)/2+4,y:112,"text-anchor":"middle","font-size":26,"font-weight":700,fill:"var(--err)",visibility:"hidden"},svg);cut.textContent="✕";
+  DOM.links[k]={ln,cut,x1,x2}});
+ Object.keys(sc.x).forEach(r=>{const x=sc.x[r],g=el("g",{class:"dev"},svg),d={g};
+  el("rect",{x:x-100,y:50,width:200,height:110,rx:12,class:"box"},g);
+  const T=(y,s,a)=>{const t=el("text",Object.assign({x:x,y,"text-anchor":"middle",fill:"var(--ink)"},a),g);t.textContent=s;return t};
+  T(76,r,{"font-size":20,"font-weight":700});T(96,`AS ${DEV[r].as}   ID ${DEV[r].id}`,{"font-size":12,fill:"var(--mut)"});
+  d.dot=el("rect",{x:x-80,y:112,width:12,height:12,rx:3},g);d.stt=T(123,"",{"font-size":14,"font-weight":600,"text-anchor":"start",x:x-62});
+  d.stt.setAttribute("x",x-62);
+  d.tm={};["cr","hold","ka"].forEach((k,i)=>{const y=178+i*16;
+   const a=el("text",{x:x-100,y:y+10,"font-size":11,fill:"var(--mut)"},svg);a.textContent=TN[k];
+   el("rect",{x:x-10,y:y+1,width:70,height:9,rx:4,fill:"var(--soft)"},svg);
+   const bar=el("rect",{x:x-10,y:y+1,width:0,height:9,rx:4,fill:"var(--acc)"},svg);
+   const v=el("text",{x:x+66,y:y+10,"font-size":11,"font-family":"var(--mono)",fill:"var(--ink)"},svg);d.tm[k]={bar,v}});
+  const h=el("text",{x:x-100,y:240,"font-size":11,"font-weight":600,fill:"var(--mut)"},svg);h.textContent="Learned routes";
+  d.rib=[0,1,2,3].map(i=>{const t=el("text",{x:x-100,y:256+i*14,"font-size":11,"font-family":"var(--mono)",fill:"var(--ink)"},svg);return t});
+  DOM[r]=d});
+ DOM.tok=el("g",{},svg);
+ const f=$("#fsm");f.innerHTML=Object.keys(sc.x).map(r=>`<div id="f${r}"><b>${r}</b>${STATES.map(s=>`<span data-s="${s}">${s}</span>`).join("")}</div>`).join("")}
+function render(s,tm){
+ Object.keys(SC[C].x).forEach(r=>{const d=DOM[r],st=s.st[r];
+  d.stt.textContent=st;d.dot.setAttribute("fill",SCOL[st]);
+  document.querySelectorAll(`#f${r} span`).forEach(e=>{const on=e.dataset.s===st;e.classList.toggle("on",on);e.style.background=on?SCOL[st]:""});
+  ["cr","hold","ka"].forEach(k=>{const v=(tm||s.tm)[r][k],t=d.tm[k];
+   if(v){t.bar.setAttribute("width",Math.max(0,Math.min(1,v[0]/v[1]))*70);t.v.textContent=Math.round(v[0])+"s"}else{t.bar.setAttribute("width",0);t.v.textContent="off"}});
+  d.rib.forEach((t,i)=>t.textContent=s.rib[r][i]||"")});
+ for(const k in DOM.links){const o=DOM.links[k],dn=s.link[k]==="down";o.ln.classList.toggle("down",dn);o.cut.setAttribute("visibility",dn?"visible":"hidden")}}
+function interp(u){const t=clone(base.tm);if(SC[C].steps[idx].tl)for(const r in t)for(const k in t[r]){const a=base.tm[r][k],b=endST.tm[r][k];if(a&&b)t[r][k]=[a[0]+(b[0]-a[0])*u,b[1]]}return t}
+function goTo(i,play){
+ cancelAnimationFrame(raf);clearTimeout(tmo);const sc=SC[C];idx=Math.max(0,Math.min(sc.steps.length-1,i));
+ ST=initST();LOG=[];msgN=0;
+ for(let k=0;k<idx;k++){const s=sc.steps[k];applyStart(ST,s);applyEnd(ST,s);(s.pk||[]).forEach(m=>LOG.push({n:++msgN,i:k,m}))}
+ const s=sc.steps[idx];base=clone(ST);applyStart(base,s);endST=clone(base);applyEnd(endST,s);
+ DOM.tok.innerHTML="";PK=(s.pk||[]).map(m=>({m,t0:200+m.w*FL,on:false}));
+ const nw=PK.length?Math.max(...PK.map(o=>o.m.w))+1:0;DUR=nw*FL+(s.tl?3400:900)+(PK.length?200:500);
+ vt=0;auto=!!play;anim=true;last=performance.now();
+ $("#ttl").textContent=`Step ${idx+1} of ${sc.steps.length}: ${s.t}`;$("#desc").textContent=s.d;$("#ev").textContent="FSM / event: "+(s.ev||"");
+ $("#note").innerHTML=s.tl?'<span class="tag">time-lapse</span>Seconds are compressed so you can watch the timers.':"";
+ $("#cnt").textContent=`Step ${idx+1} / ${sc.steps.length}`;
+ selM=null;if(PK.length)selectM(PK[0].m);else{$("#insp").innerHTML="<h2>Packet inspector</h2><p style='color:var(--mut)'>This step has no packet. The change is internal to a router (timer, state or route table).</p>";}
+ renderLog();render(base,base.tm);hot([]);
+ $("#bPrev").disabled=idx===0;$("#bNext").disabled=idx===sc.steps.length-1;
+ raf=requestAnimationFrame(frame)}
+function hot(act,lk){const sc=SC[C];Object.keys(sc.x).forEach(r=>DOM[r].g.classList.toggle("hot",act.includes(r)));for(const k in DOM.links)DOM.links[k].ln.classList.toggle("hot",(lk||[]).includes(k))}
+function launch(o){
+ o.on=true;const m=o.m,sc=SC[C],L=LINKS.find(l=>(l[0]===m.f&&l[1]===m.t)||(l[1]===m.f&&l[0]===m.t)),k=L[0]+"-"+L[1],fw=L[0]===m.f;
+ const xa=sc.x[m.f]+(fw?100:-100),xb=sc.x[m.t]+(fw?-100:100),y=fw?84:126;
+ o.xa=xa;o.xb=xb;o.lk=k;o.stop=m.lost!=null?m.lost:(base.link[k]==="down"?.5:1);
+ const lb=label(m.p),w=lb.length*6.6+16,g=el("g",{class:"tok",tabindex:0,role:"button","aria-label":lb},DOM.tok);
+ el("rect",{class:"pill",x:-w/2,y:-12,width:w,height:24,rx:12,fill:`var(--${cat(m.p)})`},g);
+ const t=el("text",{x:0,y:4,"text-anchor":"middle","font-size":11,"font-weight":700,"font-family":"var(--mono)",fill:"#fff"},g);t.textContent=lb;
+ g.addEventListener("click",()=>selectM(m));g.addEventListener("keydown",e=>{if(e.key==="Enter")selectM(m)});
+ o.g=g;o.y=y;o.m.el=g;const e=LOG.find(x=>x.m===m);if(!e){LOG.push({n:++msgN,i:idx,m});renderLog()}
+ if(m===selM)g.classList.add("sel")}
+function frame(now){raf=0;if(!anim)return;vt+=Math.min(64,now-last)*speed;last=now;
+ const s=SC[C].steps[idx],act=new Set(s.hl||[]),lk=[];
+ PK.forEach(o=>{if(!o.on&&vt>=o.t0)launch(o);if(!o.on)return;
+  const p=Math.max(0,Math.min(1,(vt-o.t0)/FL)),q=Math.min(p,o.stop),x=o.xa+(o.xb-o.xa)*q;
+  o.g.setAttribute("transform",`translate(${x},${o.y})`);
+  if(p<1){act.add(o.m.f);act.add(o.m.t);lk.push(o.lk)}
+  if(p>=1&&o.stop<1&&!o.x){o.x=el("text",{x:0,y:8,"text-anchor":"middle","font-size":26,"font-weight":700,fill:"var(--err)"},o.g);o.x.textContent="✕";o.g.setAttribute("opacity",.8);o.x.setAttribute("y",-18)}});
+ hot([...act],lk);
+ const u=Math.min(1,vt/DUR);render(vt>=DUR?endST:base,interp(vt>=DUR?1:u));
+ if(vt>=DUR){anim=false;ST=endST;render(endST);if(auto&&idx<SC[C].steps.length-1)tmo=setTimeout(()=>goTo(idx+1,true),500/speed);else auto=false;return}
+ raf=requestAnimationFrame(frame)}
+const TF={"SYN":"Open a connection","SYN-ACK":"Accept the connection","ACK":"Acknowledge received data","RST":"Reset: refuse or abort the connection"};
+function msgLen(p){const pb=x=>1+Math.ceil(+x.split("/")[1]/8);if(p.k==="ka")return 19;if(p.k==="open")return 29;if(p.k==="nf")return 21;
+ const wd=p.wd.reduce((a,x)=>a+pb(x),0),at=p.path?4+(5+2*p.path.length)+7:0;return 19+2+wd+2+at+p.nlri.reduce((a,x)=>a+pb(x),0)}
+function hdr(m){const p=m.p,L=LINKS.find(l=>(l[0]===m.f&&l[1]===m.t)||(l[1]===m.f&&l[0]===m.t)),fw=L[0]===m.f,
+ sip=fw?L[2]:L[3],dip=fw?L[3]:L[2],sp=fw?L[4]:179,dp=fw?179:L[4],S=[];
+ S.push(["IP header (RFC 791)",[["Source address",sip,"Address of "+m.f+" on this link"],["Destination address",dip,"Address of "+m.t+" on this link"],["Protocol","6 (TCP)","BGP messages are carried inside TCP"]]]);
+ const prt=x=>x===179?"179 is the well-known BGP port":"Ephemeral port chosen by the router that opened the connection";
+ S.push(["TCP header (RFC 9293)",[["Source port",sp,prt(sp)],["Destination port",dp,prt(dp)],["Flags",p.k==="tcp"?p.fl:"PSH, ACK",p.k==="tcp"?TF[p.fl]:"Carries BGP data and acknowledges earlier data"],["Sequence / ACK",p.k==="tcp"?`${p.seq??"-"} / ${p.ack??"-"}`:"managed by TCP","Byte counters that make delivery reliable and ordered"]]]);
+ if(p.k!=="tcp"){const ty={open:[1,"OPEN"],upd:[2,"UPDATE"],nf:[3,"NOTIFICATION"],ka:[4,"KEEPALIVE"]}[p.k];
+  S.push(["BGP header (RFC 4271 section 4.1)",[["Marker","FF × 16","16 bytes of ones (once used for authentication)"],["Length",msgLen(p)+" bytes","Whole message, 19 to 4096"],["Type",`${ty[0]} (${ty[1]})`,{open:"Introduces the sender",upd:"Announces or withdraws routes",nf:"Reports an error, then the session closes",ka:"Proves the neighbour is alive"}[p.k]]]]);
+  if(p.k==="open")S.push(["OPEN body (section 4.2)",[["Version","4","BGP version"],["My Autonomous System",p.as,"Sender’s AS number"],["Hold Time",p.hold+" s","Longest silence the sender tolerates; the smaller value wins"],["BGP Identifier",p.id,"Unique router ID, written as an IPv4 address"],["Optional Parameters","0 bytes","Simplified: real routers add capabilities"]]]);
+  if(p.k==="nf"){const E={2:["OPEN Message Error",{2:"Bad Peer AS"}],4:["Hold Timer Expired",{0:"Unspecific"}]}[p.code];S.push(["NOTIFICATION body (section 4.5)",[["Error code",`${p.code} (${E[0]})`,"Category of the problem"],["Error subcode",`${p.sub} (${E[1][p.sub]})`,"Detail inside the category"],["Data","none","Optional diagnostic bytes"]]])}
+  if(p.k==="upd"){const wb=p.wd.reduce((a,x)=>a+1+Math.ceil(+x.split("/")[1]/8),0),r=[["Withdrawn Routes Length",wb+" bytes","Size of the list of removed prefixes"],["Withdrawn Routes",p.wd.join(", ")||"none","Prefixes that are no longer reachable"]];
+   if(p.path){r.push(["Total Path Attribute Length",(4+5+2*p.path.length+7)+" bytes","Size of the attributes below"],["ORIGIN","0 (IGP)","How the route entered BGP. Well-known, mandatory"],["AS_PATH","AS_SEQUENCE ["+p.path.join(" ")+"]","ASes the route crossed. Used to prevent loops"],["NEXT_HOP",p.nh,"Where to send matching traffic"])}else r.push(["Total Path Attribute Length","0 bytes","A pure withdrawal carries no attributes"]);
+   r.push(["NLRI",p.nlri.join(", ")||"none","Prefixes being announced"]);S.push(["UPDATE body (section 4.3)",r])}}
+ return S}
+function selectM(m){selM=m;DOM.tok&&document.querySelectorAll(".tok").forEach(g=>g.classList.toggle("sel",g===m.el));
+ const lb=label(m.p);$("#insp").innerHTML=`<h2>Packet inspector</h2><p style="margin:0 0 6px"><span class="tag">${m.f} → ${m.t}</span><b class="mono">${lb}</b></p>`+hdr(m).map(s=>`<div class="insp"><h4>${s[0]}</h4><table><tr><th>Field</th><th>Value</th><th>Meaning</th></tr>${s[1].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("")}</table></div>`).join("");
+ document.querySelectorAll("#log button").forEach(b=>b.classList.toggle("sel",LOG[+b.dataset.k]&&LOG[+b.dataset.k].m===m))}
+function renderLog(){const l=$("#log");l.innerHTML=LOG.map((e,k)=>`<li><button data-k="${k}" class="${e.m===selM?"sel":""}"><span class="dot" style="background:var(--${cat(e.m.p)})"></span>#${e.n} ${e.m.f}→${e.m.t} ${label(e.m.p)}${e.m.lost!=null||(base&&base.link&&0)?" (lost)":""}</button></li>`).join("");
+ l.querySelectorAll("button").forEach(b=>b.onclick=()=>selectM(LOG[+b.dataset.k].m));l.scrollTop=l.scrollHeight}
+function setC(n){C=n;auto=false;anim=false;clearTimeout(tmo);document.querySelectorAll("#tabs button").forEach((b,k)=>b.setAttribute("aria-selected",k===n));build();goTo(0,false)}
+$("#tabs").innerHTML=SC.map(s=>`<button role="tab" aria-selected="false">${s.n}</button>`).join("");
+document.querySelectorAll("#tabs button").forEach((b,k)=>b.onclick=()=>setC(k));
+$("#bReset").onclick=()=>goTo(0,false);
+$("#bPrev").onclick=()=>goTo(idx-1,false);
+$("#bNext").onclick=()=>goTo(idx+1,false);
+$("#bPause").onclick=()=>{auto=false;clearTimeout(tmo);anim=false;cancelAnimationFrame(raf)};
+$("#bPlay").onclick=()=>{auto=true;clearTimeout(tmo);if(anim&&raf)return;if(vt>=DUR){if(idx<SC[C].steps.length-1)goTo(idx+1,true);else goTo(0,true)}else{anim=true;last=performance.now();raf=requestAnimationFrame(frame)}};
+$("#sp").oninput=e=>{speed=+e.target.value;$("#spv").textContent=speed.toFixed(2).replace(/0$/,"")+"x"};
+addEventListener("keydown",e=>{if(e.target.tagName==="INPUT")return;if(e.key==="ArrowRight"&&!$("#bNext").disabled)$("#bNext").click();if(e.key==="ArrowLeft"&&!$("#bPrev").disabled)$("#bPrev").click()});
+setC(0);
+</script>
+</body>
+</html>
